@@ -11,6 +11,12 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+df = load_data()
+
+# 查看前10行数据
+st.dataframe(df.head(10))
+
+
 st.set_page_config(page_title="Amazon Business Performance Dashboard", layout="wide")
 
 @st.cache_data
