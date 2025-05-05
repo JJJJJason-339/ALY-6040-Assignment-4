@@ -9,88 +9,85 @@ Original file is located at
 
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-df = load_data()
+# --- Page config ---
+st.set_page_config(page_title="Amazon Product Dashboard", layout="wide")
 
-# 查看前10行数据
-st.dataframe(df.head(10))
+# --- Data loading ---
+df = pd.read_csv('amazon_clean.csv')
 
+# --- Data cleaning ---
+df['Main_Category'] = df['category'].str.split('|').str[0]
+df['Sales'] = df['rating_count'] * df['actual_price']
 
-st.set_page_config(page_title="Amazon Business Performance Dashboard", layout="wide")
+# Clean discount_percentage
+df['discount_percentage'] = df['discount_percentage'].str.replace('%', '', regex=False)
+df['discount_percentage'] = pd.to_numeric(df['discount_percentage'], errors='coerce')
+df['rating'] = pd.to_numeric(df['rating'], errors='coerce')
 
-@st.cache_data
-def load_data():
-    # 读取新生成的干净数据
-    df = pd.read_csv("amazon_clean.csv", encoding="utf-8-sig")
+# --- Sidebar filters ---
+st.sidebar.header("Filter Options")
 
-    # 去掉 % 符号，转换数字
-    df['discount_percentage'] = df['discount_percentage'].str.replace('%', '', regex=False).astype(float)
+# Category filter
+categories = df['Main_Category'].unique().tolist()
+selected_category = st.sidebar.multiselect("Select Main Category:", categories, default=categories)
 
-    # 计算 estimated_sales
-    df['estimated_sales'] = df['rating_count'] * df['discounted_price']
+# Discount slider
+min_discount = int(df['discount_percentage'].min())
+max_discount = int(df['discount_percentage'].max())
+discount_range = st.sidebar.slider("Discount Percentage Range:", min_discount, max_discount, (min_discount, max_discount))
 
-    # 提取主类别
-    df['main_category'] = df['category'].apply(lambda x: str(x).split('|')[0])
+# --- Apply filters ---
+filtered_df = df[
+    (df['Main_Category'].isin(selected_category)) &
+    (df['discount_percentage'] >= discount_range[0]) &
+    (df['discount_percentage'] <= discount_range[1])
+]
 
-    return df
+# --- KPI display ---
+total_sales = filtered_df['Sales'].sum()
+avg_rating = filtered_df['rating'].mean()
 
-df = load_data()
+st.title("Amazon Product Dashboard 📊")
+st.markdown("### Key Performance Indicators (KPIs)")
+col1, col2 = st.columns(2)
+col1.metric("Total Sales", f"${total_sales:,.2f}")
+col2.metric("Average Rating", f"{avg_rating:.2f}")
 
-# ---------------- KPI 计算 ----------------
-average_discount = df['discount_percentage'].mean()
-average_rating = df['rating'].mean()
-total_reviews = df['rating_count'].sum()
-total_sales = df['estimated_sales'].sum()
+# --- Visualization 1: Sales by Category (Pie Chart) ---
+st.markdown("## Sales Distribution by Main Category")
+category_summary = filtered_df.groupby('Main_Category').agg(
+    Total_Sales=('Sales', 'sum'),
+    Avg_Rating=('rating', 'mean')
+).reset_index()
 
-st.title("📊 Amazon Business Performance Dashboard")
+fig1, ax1 = plt.subplots()
+ax1.pie(category_summary['Total_Sales'],
+        labels=category_summary['Main_Category'],
+        autopct='%1.1f%%', startangle=140)
+ax1.set_title('Sales Distribution by Main Category')
+st.pyplot(fig1)
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Average Discount (%)", f"{average_discount:.2f}")
-col2.metric("Average Rating", f"{average_rating:.2f}")
-col3.metric("Total Review Count", f"{int(total_reviews):,}")
-col4.metric("Estimated Total Sales (₹)", f"{total_sales:,.2f}")
+# --- Visualization 2: Average Rating by Category (Bar Chart) ---
+st.markdown("## Average Rating by Main Category")
+fig2, ax2 = plt.subplots()
+sns.barplot(x='Main_Category', y='Avg_Rating', data=category_summary, ax=ax2)
+ax2.set_xlabel('Main Category')
+ax2.set_ylabel('Average Rating')
+ax2.set_title('Average Rating by Main Category')
+plt.xticks(rotation=45)
+st.pyplot(fig2)
 
-st.markdown("---")
+# --- Visualization 3: Discount % vs Rating Scatter Plot + Regression ---
+st.markdown("## Discount Percentage vs. Average Rating")
+df_clean = filtered_df.dropna(subset=['discount_percentage', 'rating'])
 
-# ---------------- 可视化1：饼图（类别销售额分布） ----------------
-sales_by_category = df.groupby('main_category')['estimated_sales'].sum().reset_index()
-sales_by_category = sales_by_category[sales_by_category['estimated_sales'] > 0]
-
-fig1 = px.pie(
-    sales_by_category,
-    names='main_category',
-    values='estimated_sales',
-    title='Sales Distribution by Main Category'
-)
-st.plotly_chart(fig1, use_container_width=True)
-
-st.markdown("---")
-
-# ---------------- 可视化2：散点图（折扣 vs 评分） ----------------
-df_scatter = df.dropna(subset=['estimated_sales', 'rating', 'discount_percentage'])
-df_scatter = df_scatter[(df_scatter['estimated_sales'] > 0) & (df_scatter['discount_percentage'] >= 20)]
-
-fig2 = px.scatter(
-    df_scatter,
-    x='discount_percentage',
-    y='rating',
-    size='estimated_sales',
-    size_max=20,
-    title='Discount Percentage vs Rating (Discount ≥ 20%)',
-    trendline='ols',
-    hover_data=['product_name']
-)
-st.plotly_chart(fig2, use_container_width=True)
-
-st.markdown("---")
-
-# ---------------- 可视化3：柱状图（不同类别的平均评分） ----------------
-category_rating = df.groupby('main_category')['rating'].mean().reset_index()
-fig3 = px.bar(
-    category_rating,
-    x='main_category',
-    y='rating',
-    title='Average Rating by Main Category'
-)
-st.plotly_chart(fig3, use_container_width=True)
+fig3, ax3 = plt.subplots()
+sns.scatterplot(data=df_clean, x='discount_percentage', y='rating', ax=ax3)
+sns.regplot(data=df_clean, x='discount_percentage', y='rating', scatter=False, color='red', ax=ax3)
+ax3.set_xlabel('Discount Percentage')
+ax3.set_ylabel('Average Rating')
+ax3.set_title('Discount Percentage vs. Average Rating')
+st.pyplot(fig3)
