@@ -15,14 +15,21 @@ st.set_page_config(page_title="Amazon Business Performance Dashboard", layout="w
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv("amazon.csv")
-    df['discounted_price'] = df['discounted_price'].str.replace('₹', '').str.replace(',', '').astype(float)
-    df['actual_price'] = df['actual_price'].str.replace('₹', '').str.replace(',', '').astype(float)
-    df['discount_percentage'] = df['discount_percentage'].str.replace('%', '').astype(float)
+    # 加了 encoding，避免 csv 中文或符号乱码
+    df = pd.read_csv("amazon.csv", encoding="utf-8-sig")
+
+    # 数据清洗
+    df['discounted_price'] = df['discounted_price'].str.replace('₹', '', regex=False).str.replace(',', '', regex=False).astype(float)
+    df['actual_price'] = df['actual_price'].str.replace('₹', '', regex=False).str.replace(',', '', regex=False).astype(float)
+    df['discount_percentage'] = df['discount_percentage'].str.replace('%', '', regex=False).astype(float)
     df['rating'] = pd.to_numeric(df['rating'], errors='coerce')
-    df['rating_count'] = df['rating_count'].str.replace(',', '').astype(float)
+    df['rating_count'] = df['rating_count'].str.replace(',', '', regex=False).astype(float)
     df['estimated_sales'] = df['rating_count'] * df['discounted_price']
     df['main_category'] = df['category'].apply(lambda x: str(x).split('|')[0])
+
+    # 检查核心数据（方便你调试）
+    st.write("🔎 Preview of cleaned data:", df[['main_category', 'estimated_sales', 'discount_percentage', 'rating']].head(10))
+
     return df
 
 df = load_data()
@@ -42,7 +49,12 @@ col4.metric("Estimated Total Sales (₹)", f"{total_sales:,.2f}")
 
 st.markdown("---")
 
+# ------------------ 可视化1：饼图 -------------------
 sales_by_category = df.groupby('main_category')['estimated_sales'].sum().reset_index()
+
+# 过滤掉销售额为0的类别，避免显示全11%（主要是这一步之前遗漏了）
+sales_by_category = sales_by_category[sales_by_category['estimated_sales'] > 0]
+
 fig1 = px.pie(
     sales_by_category,
     names='main_category',
@@ -53,6 +65,7 @@ st.plotly_chart(fig1, use_container_width=True)
 
 st.markdown("---")
 
+# ------------------ 可视化2：散点 -------------------
 df_scatter = df.dropna(subset=['estimated_sales', 'rating', 'discount_percentage'])
 df_scatter = df_scatter[(df_scatter['estimated_sales'] > 0) & (df_scatter['discount_percentage'] >= 20)]
 
@@ -70,6 +83,7 @@ st.plotly_chart(fig2, use_container_width=True)
 
 st.markdown("---")
 
+# ------------------ 可视化3：类别平均评分 -------------------
 category_rating = df.groupby('main_category')['rating'].mean().reset_index()
 fig3 = px.bar(
     category_rating,
